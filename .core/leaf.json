@@ -1,0 +1,14 @@
+{
+  "kind": "leaf",
+  "name": "adt",
+  "description": "AI Development Toolkit - governance + reconciliation engine",
+  "upgradeVerification": {
+    "commands": [
+      {
+        "name": "Initializer help",
+        "shell": "powershell",
+        "command": "powershell -ExecutionPolicy Bypass -File scripts/adt-init.ps1 -?"
+      }
+    ]
+  }
+}
