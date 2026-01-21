@@ -26,6 +26,24 @@ function New-AdtFile {
     }
 }
 
+function New-AdtJsonFileIfMissing {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Json
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        $parent = Split-Path -Parent $Path
+        if ($parent) {
+            New-AdtDirectory -Path $parent
+        }
+        $Json | Set-Content -LiteralPath $Path -Encoding UTF8
+        return $true
+    }
+
+    return $false
+}
+
 function Add-AdtLineIfMissing {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -173,6 +191,24 @@ if (Test-Path -LiteralPath $templateDir) {
             Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force
         }
     }
+}
+
+# Capabilities (generated if missing)
+$capabilitiesPath = Join-Path (Join-Path $projectDir '_schema') 'capabilities.json'
+$defaultCapabilities = @{
+    schemaVersion = '20260121T000000Z'
+    capabilities = @{
+        autoMigrateSchema = $true
+        driftRepair = 'safe'
+        requireUpgradeIntent = $true
+        coreModelEnabled = $true
+        enforceCanonicalLeaves = 'warn'
+    }
+} | ConvertTo-Json -Depth 6
+
+$capCreated = New-AdtJsonFileIfMissing -Path $capabilitiesPath -Json $defaultCapabilities
+if ($capCreated) {
+    Write-Host 'Created .project/_schema/capabilities.json.'
 }
 
 New-AdtDirectory -Path (Join-Path $ProjectRoot '.scratchpad')
