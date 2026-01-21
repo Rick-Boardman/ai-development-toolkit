@@ -25,7 +25,7 @@ powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt-init.ps1
 Run reconcile (runs migrations, updates core catalog):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 reconcile
+powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 reconcile
 ```
 
 Commit:
@@ -50,7 +50,7 @@ git submodule update --remote --merge _core/adt
 Option A (recommended): run ADT upgrade orchestration (requires intent by default and records results):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 upgrade -Leaf adt
+powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 upgrade -Leaf adt
 ```
 
 Option B: manual update + reconcile:
@@ -58,7 +58,7 @@ Option B: manual update + reconcile:
 Then run reconciler (safe, idempotent):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 reconcile
+powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 reconcile
 ```
 
 If you use Option B, record outcome in:

@@ -24,7 +24,7 @@ function Show-AdtHelp {
 ADT (Evergreen) CLI
 
 Usage:
-  powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 <command> [options]
+  powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 <command> [options]
 
 Commands:
   reconcile        Ensure structure, apply migrations (if enabled), update core catalog
@@ -45,9 +45,9 @@ upgrade options:
   -NoVerify             Skip verification commands (not recommended)
 
 Examples:
-  powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 reconcile
-  powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 migrate -Force
-  powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 upgrade -Leaf adt
+  powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 reconcile
+  powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 migrate -Force
+  powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 upgrade -Leaf adt
 '@
 }
 
@@ -58,32 +58,55 @@ switch ($Command.ToLowerInvariant()) {
     'help' { Show-AdtHelp; exit 0 }
 
     'reconcile' {
-        $projectDir = Ensure-AdtProjectStructure -RepoRoot $repoRoot -DryRun:$DryRun
-        $caps = Get-AdtCapabilities -ProjectDir $projectDir
+      $projectDir = Ensure-AdtProjectScaffold -RepoRoot $repoRoot -DryRun:$DryRun
+      $caps = Get-AdtCapabilities -ProjectDir $projectDir
 
-        if ($caps.capabilities.autoMigrateSchema -eq $true) {
-            Invoke-AdtMigrations -RepoRoot $repoRoot -ProjectDir $projectDir -DryRun:$DryRun -Force:$Force
+      Invoke-AdtDriftRepair -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps -DryRun:$DryRun
+      Invoke-AdtSchemaValidation -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps
+
+      if ($caps.capabilities.autoMigrateSchema -eq $true) {
+        Invoke-AdtMigrations -RepoRoot $repoRoot -ProjectDir $projectDir -DryRun:$DryRun -Force:$Force
+      }
+
+      if ($caps.capabilities.coreModelEnabled -eq $true) {
+        $catalog = Invoke-AdtCoreCatalog -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps -DryRun:$DryRun
+
+        $canonMode = [string]$caps.capabilities.enforceCanonicalLeaves
+        if ($canonMode -eq 'error' -and $catalog -and $catalog.errors -and $catalog.errors.Count -gt 0) {
+          $blocking = @()
+          foreach ($e in $catalog.errors) {
+            if (-not ($e -like 'WARN:*') -and -not ($e -like 'HINT:*')) {
+              $blocking += $e
+            }
+          }
+          if ($blocking.Count -gt 0) {
+            throw "Canonical leaf enforcement failed with $($blocking.Count) error(s)."
+          }
         }
+      }
 
-        if ($caps.capabilities.coreModelEnabled -eq $true) {
-            $null = Invoke-AdtCoreCatalog -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps -DryRun:$DryRun
-        }
+      Invoke-AdtDependencyEnforcement -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps
 
-        Write-AdtInfo 'reconcile complete.'
+      Write-AdtInfo 'reconcile complete.'
         exit 0
     }
 
     'migrate' {
-        $projectDir = Ensure-AdtProjectStructure -RepoRoot $repoRoot -DryRun:$DryRun
-        Invoke-AdtMigrations -RepoRoot $repoRoot -ProjectDir $projectDir -DryRun:$DryRun -Force:$Force
+      $projectDir = Ensure-AdtProjectScaffold -RepoRoot $repoRoot -DryRun:$DryRun
+      $caps = Get-AdtCapabilities -ProjectDir $projectDir
+      Invoke-AdtDriftRepair -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps -DryRun:$DryRun
+      Invoke-AdtSchemaValidation -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps
+      Invoke-AdtMigrations -RepoRoot $repoRoot -ProjectDir $projectDir -DryRun:$DryRun -Force:$Force
         Write-AdtInfo 'migrate complete.'
         exit 0
     }
 
     'core' {
-        $projectDir = Ensure-AdtProjectStructure -RepoRoot $repoRoot -DryRun:$DryRun
-        $caps = Get-AdtCapabilities -ProjectDir $projectDir
-        $null = Invoke-AdtCoreCatalog -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps -DryRun:$DryRun
+      $projectDir = Ensure-AdtProjectScaffold -RepoRoot $repoRoot -DryRun:$DryRun
+      $caps = Get-AdtCapabilities -ProjectDir $projectDir
+      Invoke-AdtDriftRepair -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps -DryRun:$DryRun
+      Invoke-AdtSchemaValidation -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps
+      $null = Invoke-AdtCoreCatalog -RepoRoot $repoRoot -ProjectDir $projectDir -Capabilities $caps -DryRun:$DryRun
         Write-AdtInfo 'core catalog updated.'
         exit 0
     }

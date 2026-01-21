@@ -25,7 +25,7 @@ powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt-init.ps1
 Then run the reconciler (applies migrations and updates platform state):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 reconcile
+powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 reconcile
 ```
 
 ## Updating ADT (same protocol as other leaves)
@@ -40,7 +40,7 @@ git submodule update --remote --merge _core/adt
 3. Run reconciler (pulls in new template files, runs migrations, updates core catalog):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 reconcile
+powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 reconcile
 ```
 
 4. Run initializer once if needed (upgrade backfill):
@@ -57,3 +57,4 @@ Commit the updated submodule pointer and any new `.project/` state files.
 
 - See [INSTRUCTIONS.md](INSTRUCTIONS.md) for the required Copilot/agent protocol.
 - See [INTEGRATION-GUIDE.md](INTEGRATION-GUIDE.md) for install/update steps.
+- See [LEAF-AUTHOR-GUIDE.md](LEAF-AUTHOR-GUIDE.md) for `_core` node metadata contracts.

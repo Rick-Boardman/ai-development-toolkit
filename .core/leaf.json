@@ -7,12 +7,12 @@
       {
         "name": "ADT CLI help",
         "shell": "powershell",
-        "command": "& '<repoRoot>\\_core\\adt\\scripts\\adt.ps1' help -ProjectRoot '<repoRoot>'"
+        "command": "& '<repoRoot>\\_core\\adt\\adt.ps1' help -ProjectRoot '<repoRoot>'"
       },
       {
         "name": "ADT reconcile dry-run",
         "shell": "powershell",
-        "command": "& '<repoRoot>\\_core\\adt\\scripts\\adt.ps1' reconcile -ProjectRoot '<repoRoot>' -DryRun"
+        "command": "& '<repoRoot>\\_core\\adt\\adt.ps1' reconcile -ProjectRoot '<repoRoot>' -DryRun"
       }
     ]
   }

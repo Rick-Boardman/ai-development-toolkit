@@ -105,6 +105,164 @@ function New-AdtJsonIfMissing {
     return $false
 }
 
+function Get-AdtSchemasRoot {
+    return (Join-Path (Get-AdtToolkitRoot) 'schemas')
+}
+
+function Get-AdtSchemaPath {
+    param([Parameter(Mandatory = $true)][string]$SchemaFileName)
+
+    return (Join-Path (Get-AdtSchemasRoot) $SchemaFileName)
+}
+
+function Get-AdtJsonTypeName {
+    param([Parameter(Mandatory = $true)]$Value)
+
+    if ($null -eq $Value) { return 'null' }
+
+    if ($Value -is [string]) { return 'string' }
+    if ($Value -is [bool]) { return 'boolean' }
+    if ($Value -is [int] -or $Value -is [long]) { return 'integer' }
+    if ($Value -is [double] -or $Value -is [decimal] -or $Value -is [float]) { return 'number' }
+    if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [string])) { return 'array' }
+
+    # ConvertFrom-Json returns PSCustomObject for objects.
+    return 'object'
+}
+
+function Test-AdtValueAgainstSchema {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)]$Schema,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $errors = @()
+
+    if ($Schema.PSObject.Properties.Name -contains 'const') {
+        if ($Value -ne $Schema.const) {
+            $errors += "$Path must equal '$($Schema.const)'"
+        }
+        return $errors
+    }
+
+    if ($Schema.PSObject.Properties.Name -contains 'enum') {
+        $ok = $false
+        foreach ($v in $Schema.enum) {
+            if ($Value -eq $v) { $ok = $true; break }
+        }
+        if (-not $ok) {
+            $errors += "$Path must be one of: $([string]::Join(', ', $Schema.enum))"
+        }
+        return $errors
+    }
+
+    if ($Schema.PSObject.Properties.Name -contains 'type') {
+        $expected = [string]$Schema.type
+        $actual = Get-AdtJsonTypeName -Value $Value
+        $typeOk = $true
+
+        if ($expected -eq 'number') {
+            $typeOk = ($actual -eq 'number' -or $actual -eq 'integer')
+        } else {
+            $typeOk = ($actual -eq $expected)
+        }
+
+        if (-not $typeOk) {
+            $errors += "$Path must be a $expected (got $actual)"
+            return $errors
+        }
+    }
+
+    $minLength = $null
+    if ($Schema.PSObject.Properties.Name -contains 'minLength') {
+        $minLength = [int]$Schema.minLength
+    }
+    if ($minLength -ne $null -and $Value -is [string]) {
+        if ($Value.Length -lt $minLength) {
+            $errors += "$Path must be at least $minLength characters"
+        }
+    }
+
+    $valueType = Get-AdtJsonTypeName -Value $Value
+    if ($valueType -eq 'object') {
+        $propNames = @()
+        foreach ($p in $Value.PSObject.Properties) {
+            $propNames += $p.Name
+        }
+
+        if ($Schema.PSObject.Properties.Name -contains 'required') {
+            foreach ($req in $Schema.required) {
+                if (-not ($propNames -contains $req)) {
+                    $errors += "$Path.$req is required"
+                }
+            }
+        }
+
+        $additionalProperties = $true
+        if ($Schema.PSObject.Properties.Name -contains 'additionalProperties') {
+            $additionalProperties = [bool]$Schema.additionalProperties
+        }
+
+        $schemaProps = $null
+        if ($Schema.PSObject.Properties.Name -contains 'properties') {
+            $schemaProps = $Schema.properties
+        }
+
+        if (-not $additionalProperties -and $schemaProps) {
+            foreach ($pn in $propNames) {
+                if (-not ($schemaProps.PSObject.Properties.Name -contains $pn)) {
+                    $errors += "$Path.$pn is not allowed"
+                }
+            }
+        }
+
+        if ($schemaProps) {
+            foreach ($prop in $schemaProps.PSObject.Properties) {
+                $pn = $prop.Name
+                if ($propNames -contains $pn) {
+                    $child = $Value.$pn
+                    $errors += Test-AdtValueAgainstSchema -Value $child -Schema $schemaProps.$pn -Path ("$Path.$pn")
+                }
+            }
+        }
+    } elseif ($valueType -eq 'array') {
+        if ($Schema.PSObject.Properties.Name -contains 'items') {
+            $i = 0
+            foreach ($item in $Value) {
+                $errors += Test-AdtValueAgainstSchema -Value $item -Schema $Schema.items -Path ("$Path[$i]")
+                $i++
+            }
+        }
+    }
+
+    return $errors
+}
+
+function Test-AdtJsonAgainstSchema {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstancePath,
+        [Parameter(Mandatory = $true)][string]$SchemaPath
+    )
+
+    if (-not (Test-Path -LiteralPath $InstancePath)) {
+        return [pscustomobject]@{ ok = $false; errors = @("File not found: $InstancePath") }
+    }
+    if (-not (Test-Path -LiteralPath $SchemaPath)) {
+        return [pscustomobject]@{ ok = $false; errors = @("Schema not found: $SchemaPath") }
+    }
+
+    $instance = Read-AdtJson -Path $InstancePath
+    $schema = Read-AdtJson -Path $SchemaPath
+
+    if (-not $schema) {
+        return [pscustomobject]@{ ok = $false; errors = @("Failed to load schema: $SchemaPath") }
+    }
+
+    $errs = Test-AdtValueAgainstSchema -Value $instance -Schema $schema -Path '$'
+    return [pscustomobject]@{ ok = ($errs.Count -eq 0); errors = $errs }
+}
+
 function Copy-AdtTemplateMissing {
     param(
         [Parameter(Mandatory = $true)][string]$TemplateDir,
@@ -178,6 +336,8 @@ function Get-AdtDefaultCapabilities {
             requireUpgradeIntent = $true
             coreModelEnabled = $true
             enforceCanonicalLeaves = 'warn'
+            schemaValidation = 'warn'
+            dependencyEnforcement = 'warn'
         }
     }
 }
@@ -241,22 +401,123 @@ function Ensure-AdtState {
     }
 }
 
-function Ensure-AdtProjectStructure {
+function Ensure-AdtProjectScaffold {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
         [switch]$DryRun
     )
 
-    $toolkitRoot = Get-AdtToolkitRoot
-    $templateDir = Join-Path $toolkitRoot 'project-template'
     $projectDir = Join-Path $RepoRoot '.project'
-
-    Copy-AdtTemplateMissing -TemplateDir $templateDir -ProjectDir $projectDir -DryRun:$DryRun
+    if (-not (Test-Path -LiteralPath $projectDir)) {
+        if ($DryRun) {
+            Write-AdtInfo "[dry-run] Would create $projectDir"
+        } else {
+            New-AdtDirectory -Path $projectDir
+        }
+    }
 
     Ensure-AdtCapabilities -ProjectDir $projectDir -DryRun:$DryRun
     Ensure-AdtState -ProjectDir $projectDir -DryRun:$DryRun
+    return $projectDir
+}
 
-    # Scratchpad
+function Invoke-AdtSchemaValidation {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$ProjectDir,
+        [Parameter(Mandatory = $true)]$Capabilities,
+        [switch]$ThrowOnError
+    )
+
+    $mode = 'warn'
+    try {
+        if ($Capabilities -and $Capabilities.capabilities -and $Capabilities.capabilities.schemaValidation) {
+            $mode = [string]$Capabilities.capabilities.schemaValidation
+        }
+    } catch { }
+
+    if ($mode -eq 'off') {
+        return @()
+    }
+
+    $errors = @()
+
+    # Capabilities
+    $capPath = Join-Path (Join-Path $ProjectDir '_schema') 'capabilities.json'
+    $capSchema = Get-AdtSchemaPath -SchemaFileName 'project.capabilities.schema.json'
+    $capRes = Test-AdtJsonAgainstSchema -InstancePath $capPath -SchemaPath $capSchema
+    if (-not $capRes.ok) {
+        foreach ($e in $capRes.errors) { $errors += "capabilities.json: $e" }
+    }
+
+    # Dependencies state (if present)
+    $depsPath = Join-Path (Join-Path $ProjectDir 'state') 'dependencies.json'
+    if (Test-Path -LiteralPath $depsPath) {
+        $depsSchema = Get-AdtSchemaPath -SchemaFileName 'project.dependencies.schema.json'
+        $depsRes = Test-AdtJsonAgainstSchema -InstancePath $depsPath -SchemaPath $depsSchema
+        if (-not $depsRes.ok) {
+            foreach ($e in $depsRes.errors) { $errors += "dependencies.json: $e" }
+        }
+    }
+
+    # Core node metadata
+    $coreRoot = Join-Path $RepoRoot '_core'
+    if (Test-Path -LiteralPath $coreRoot) {
+        $leafSchema = Get-AdtSchemaPath -SchemaFileName 'core.leaf.schema.json'
+        $indexSchema = Get-AdtSchemaPath -SchemaFileName 'core.index.schema.json'
+
+        $metaFiles = Get-ChildItem -LiteralPath $coreRoot -Recurse -Force -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\.core\\\\(leaf|index)\.json$" }
+
+        foreach ($f in $metaFiles) {
+            $schemaPath = $indexSchema
+            if ($f.Name -eq 'leaf.json') { $schemaPath = $leafSchema }
+            $res = Test-AdtJsonAgainstSchema -InstancePath $f.FullName -SchemaPath $schemaPath
+            if (-not $res.ok) {
+                foreach ($e in $res.errors) { $errors += "${($f.FullName.Replace($RepoRoot, '').TrimStart('\\','/'))}: $e" }
+            }
+        }
+    }
+
+    if ($errors.Count -gt 0) {
+        foreach ($e in $errors) {
+            if ($mode -eq 'warn') {
+                Write-AdtInfo "WARN: schema validation: $e"
+            }
+        }
+
+        if ($mode -eq 'error' -or $ThrowOnError) {
+            throw "Schema validation failed with $($errors.Count) error(s)."
+        }
+    }
+
+    return $errors
+}
+
+function Invoke-AdtDriftRepair {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$ProjectDir,
+        [Parameter(Mandatory = $true)]$Capabilities,
+        [switch]$DryRun
+    )
+
+    $mode = 'safe'
+    try {
+        if ($Capabilities -and $Capabilities.capabilities -and $Capabilities.capabilities.driftRepair) {
+            $mode = [string]$Capabilities.capabilities.driftRepair
+        }
+    } catch { }
+
+    if ($mode -eq 'off') {
+        return
+    }
+
+    $toolkitRoot = Get-AdtToolkitRoot
+    $templateDir = Join-Path $toolkitRoot 'project-template'
+    Copy-AdtTemplateMissing -TemplateDir $templateDir -ProjectDir $ProjectDir -DryRun:$DryRun
+
+    # Project-side safe drift repair only (do NOT modify submodules under _core).
     $scratchpad = Join-Path $RepoRoot '.scratchpad'
     if (-not (Test-Path -LiteralPath $scratchpad)) {
         if ($DryRun) {
@@ -266,7 +527,6 @@ function Ensure-AdtProjectStructure {
         }
     }
 
-    # Gitignore
     $gitignorePath = Join-Path $RepoRoot '.gitignore'
     if ($DryRun) {
         Write-AdtInfo "[dry-run] Would ensure .scratchpad/ is in $gitignorePath"
@@ -274,7 +534,6 @@ function Ensure-AdtProjectStructure {
         Add-AdtLineIfMissing -FilePath $gitignorePath -Line '.scratchpad/'
     }
 
-    # Copilot instructions (best-effort; do not overwrite existing content)
     $githubDir = Join-Path $RepoRoot '.github'
     $copilotPath = Join-Path $githubDir 'copilot-instructions.md'
     if (-not (Test-Path -LiteralPath $githubDir)) {
@@ -284,7 +543,6 @@ function Ensure-AdtProjectStructure {
             New-AdtDirectory -Path $githubDir
         }
     }
-
     if (-not (Test-Path -LiteralPath $copilotPath)) {
         if ($DryRun) {
             Write-AdtInfo "[dry-run] Would create $copilotPath with ADT snippet"
@@ -330,6 +588,17 @@ function Ensure-AdtProjectStructure {
             Set-Content -LiteralPath $copilotPath -Value ($block + $content) -Encoding UTF8
         }
     }
+}
+
+function Ensure-AdtProjectStructure {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [switch]$DryRun
+    )
+
+    $projectDir = Ensure-AdtProjectScaffold -RepoRoot $RepoRoot -DryRun:$DryRun
+    $caps = Get-AdtCapabilities -ProjectDir $projectDir
+    Invoke-AdtDriftRepair -RepoRoot $RepoRoot -ProjectDir $projectDir -Capabilities $caps -DryRun:$DryRun
 
     return $projectDir
 }
@@ -546,6 +815,45 @@ function Get-AdtCoreRoot {
     return (Join-Path $RepoRoot '_core')
 }
 
+function Get-AdtRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Base,
+        [Parameter(Mandatory = $true)][string]$FullPath
+    )
+
+    $basePath = (Resolve-Path -LiteralPath $Base).Path
+    $full = (Resolve-Path -LiteralPath $FullPath).Path
+    if ($full.StartsWith($basePath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $full.Substring($basePath.Length).TrimStart('\\','/')
+    }
+    return $FullPath
+}
+
+function Find-AdtCoreNodes {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+    $coreRoot = Get-AdtCoreRoot -RepoRoot $RepoRoot
+    if (-not (Test-Path -LiteralPath $coreRoot)) {
+        return @()
+    }
+
+    $dirs = Get-ChildItem -LiteralPath $coreRoot -Directory -Recurse -Force -ErrorAction SilentlyContinue
+    $nodes = @()
+
+    foreach ($d in $dirs) {
+        $coreMetaDir = Join-Path $d.FullName '.core'
+        if (-not (Test-Path -LiteralPath $coreMetaDir)) { continue }
+
+        $leafPath = Join-Path $coreMetaDir 'leaf.json'
+        $indexPath = Join-Path $coreMetaDir 'index.json'
+        if ((Test-Path -LiteralPath $leafPath) -or (Test-Path -LiteralPath $indexPath)) {
+            $nodes += $d.FullName
+        }
+    }
+
+    return $nodes
+}
+
 function Get-AdtLeafMetadata {
     param([Parameter(Mandatory = $true)][string]$LeafDir)
 
@@ -606,11 +914,15 @@ function Invoke-AdtCoreCatalog {
         return $catalog
     }
 
-    $nodeDirs = Get-ChildItem -LiteralPath $coreRoot -Directory -Force
+    $nodeDirs = Find-AdtCoreNodes -RepoRoot $RepoRoot
 
-    foreach ($dir in $nodeDirs) {
-        $id = $dir.Name
-        $nodePath = $dir.FullName
+    # Build a quick lookup map (id -> node).
+    $nodeMap = @{}
+
+    foreach ($nodePath in $nodeDirs) {
+        $relFromCore = Get-AdtRelativePath -Base $coreRoot -FullPath $nodePath
+        $id = $relFromCore -replace '\\', '/'
+        if (-not $id) { continue }
 
         $leafMeta = Get-AdtLeafMetadata -LeafDir $nodePath
         $indexMeta = Get-AdtIndexMetadata -IndexDir $nodePath
@@ -630,17 +942,34 @@ function Invoke-AdtCoreCatalog {
             $nodeErrors += 'Missing .core/leaf.json or .core/index.json'
         }
 
-        $catalog.nodes += [pscustomobject]@{
+        $node = [pscustomobject]@{
             id = $id
-            path = "_core/$id"
+            path = ("_core/{0}" -f $id)
             kind = $kind
             meta = $meta
             errors = $nodeErrors
         }
+
+        $catalog.nodes += $node
+        $nodeMap[$id] = $node
     }
 
     # Canonical leaf enforcement
     $mode = [string]$Capabilities.capabilities.enforceCanonicalLeaves
+    # Helper map for matching canonical leaf references by basename when unique.
+    $nameToId = @{}
+    $nameAmbiguous = @{}
+    foreach ($n0 in $catalog.nodes) {
+        $baseName = ($n0.id -split '/')[($n0.id -split '/').Length - 1]
+        if ($nameToId.ContainsKey($baseName)) {
+            $nameAmbiguous[$baseName] = $true
+        } else {
+            $nameToId[$baseName] = $n0.id
+        }
+    }
+
+    $missingCanon = @()
+
     foreach ($n in $catalog.nodes) {
         if ($n.kind -ne 'index') { continue }
         if (-not $n.meta) { continue }
@@ -648,10 +977,18 @@ function Invoke-AdtCoreCatalog {
         $canon = $n.meta.canonicalLeaves
         if (-not $canon) { continue }
 
-        foreach ($leafId in $canon) {
-            $exists = $false
-            foreach ($candidate in $catalog.nodes) {
-                if ($candidate.id -eq $leafId) { $exists = $true; break }
+        foreach ($leafIdRaw in $canon) {
+            $leafId = [string]$leafIdRaw
+            $candidateId = $leafId
+            $exists = $nodeMap.ContainsKey($candidateId)
+
+            if (-not $exists) {
+                if (-not ($leafId -match '/')) {
+                    if ($nameToId.ContainsKey($leafId) -and -not $nameAmbiguous.ContainsKey($leafId)) {
+                        $candidateId = $nameToId[$leafId]
+                        $exists = $nodeMap.ContainsKey($candidateId)
+                    }
+                }
             }
 
             if (-not $exists) {
@@ -661,6 +998,19 @@ function Invoke-AdtCoreCatalog {
                 } elseif ($mode -eq 'warn') {
                     $catalog.errors += "WARN: $msg"
                 }
+
+                $missingCanon += [pscustomobject]@{ index = $n.id; leaf = $leafId }
+            }
+        }
+    }
+
+    if ($missingCanon.Count -gt 0 -and $mode -ne 'off') {
+        foreach ($m in $missingCanon) {
+            $hint = "To add: git submodule add <url> _core/$($m.leaf)"
+            if ($mode -eq 'error') {
+                $catalog.errors += $hint
+            } else {
+                $catalog.errors += "HINT: $hint"
             }
         }
     }
@@ -674,6 +1024,124 @@ function Invoke-AdtCoreCatalog {
     return $catalog
 }
 
+function Get-AdtDependenciesState {
+    param([Parameter(Mandatory = $true)][string]$ProjectDir)
+
+    $path = Join-Path (Join-Path $ProjectDir 'state') 'dependencies.json'
+    $state = Read-AdtJson -Path $path
+
+    if (-not $state) {
+        $state = [pscustomobject]@{
+            schemaVersion = '20260121T000000Z'
+            dependencies = @()
+        }
+    }
+
+    return $state
+}
+
+function Invoke-AdtDependencyEnforcement {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$ProjectDir,
+        [Parameter(Mandatory = $true)]$Capabilities
+    )
+
+    $mode = 'warn'
+    try {
+        if ($Capabilities -and $Capabilities.capabilities -and $Capabilities.capabilities.dependencyEnforcement) {
+            $mode = [string]$Capabilities.capabilities.dependencyEnforcement
+        }
+    } catch { }
+
+    if ($mode -eq 'off') {
+        return
+    }
+
+    $deps = Get-AdtDependenciesState -ProjectDir $ProjectDir
+    $missing = @()
+
+    foreach ($d in $deps.dependencies) {
+        $leaf = [string]$d.leaf
+        $path = $null
+        try { $path = [string]$d.path } catch { $path = $null }
+
+        $target = $null
+        if ($path -and $path.Trim().Length -gt 0) {
+            $target = Join-Path $RepoRoot $path
+        } else {
+            $target = Join-Path (Join-Path $RepoRoot '_core') $leaf
+        }
+
+        if (-not (Test-Path -LiteralPath $target)) {
+            $missing += [pscustomobject]@{ leaf = $leaf; path = $target }
+        }
+    }
+
+    if ($missing.Count -gt 0) {
+        foreach ($m in $missing) {
+            $msg = "Missing dependency leaf '$($m.leaf)' at '$($m.path)'"
+            if ($mode -eq 'warn') {
+                Write-AdtInfo "WARN: $msg"
+            }
+        }
+
+        if ($mode -eq 'error') {
+            throw "Dependency enforcement failed with $($missing.Count) missing dependency(ies)."
+        }
+    }
+}
+
+function Assert-AdtCommandAvailable {
+    param(
+        [Parameter(Mandatory = $true)][string]$CommandName,
+        [Parameter(Mandatory = $true)][string]$Hint
+    )
+
+    $cmd = Get-Command $CommandName -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        throw "$Hint (missing command: $CommandName)"
+    }
+}
+
+function Invoke-AdtShellCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Shell,
+        [Parameter(Mandatory = $true)][string]$Command,
+        [string]$WorkingDirectory
+    )
+
+    $out = ''
+    $exit = 0
+
+    if ($WorkingDirectory -and $WorkingDirectory.Trim().Length -gt 0) {
+        Push-Location -LiteralPath $WorkingDirectory
+    }
+
+    try {
+        if ($Shell -eq 'powershell' -or $Shell -eq 'pwsh') {
+            # Run in-process to avoid brittle quoting issues.
+            $out = (Invoke-Expression $Command 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne $null) { $exit = $LASTEXITCODE } else { $exit = 0 }
+        } elseif ($Shell -eq 'cmd') {
+            $out = (& cmd /c $Command 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne $null) { $exit = $LASTEXITCODE } else { $exit = 0 }
+        } elseif ($Shell -eq 'bash') {
+            Assert-AdtCommandAvailable -CommandName 'bash' -Hint 'Shell "bash" requested but bash was not found on PATH.'
+            $out = (& bash -lc $Command 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne $null) { $exit = $LASTEXITCODE } else { $exit = 0 }
+        } else {
+            throw "Unsupported shell: $Shell"
+        }
+    } finally {
+        if ($WorkingDirectory -and $WorkingDirectory.Trim().Length -gt 0) {
+            Pop-Location
+        }
+    }
+
+    return [pscustomobject]@{ exitCode = $exit; output = $out }
+}
+
 function Invoke-AdtUpgrade {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -684,7 +1152,13 @@ function Invoke-AdtUpgrade {
         [string]$IntentFile
     )
 
-    $projectDir = Join-Path $RepoRoot '.project'
+    Assert-AdtCommandAvailable -CommandName 'git' -Hint 'git is required for ADT upgrade.'
+
+    $projectDir = Ensure-AdtProjectScaffold -RepoRoot $RepoRoot
+    $caps = Get-AdtCapabilities -ProjectDir $projectDir
+    Invoke-AdtDriftRepair -RepoRoot $RepoRoot -ProjectDir $projectDir -Capabilities $caps -DryRun:$DryRun
+    Invoke-AdtSchemaValidation -RepoRoot $RepoRoot -ProjectDir $projectDir -Capabilities $caps
+
     $intentDir = Join-Path (Join-Path $projectDir 'record') 'upgrade-intents'
 
     $leafPath = $Leaf
@@ -695,6 +1169,7 @@ function Invoke-AdtUpgrade {
     }
 
     $leafRel = $leafPath.Replace($RepoRoot, '').TrimStart('\\').TrimStart('/')
+    $leafRelGit = ($leafRel -replace '\\', '/')
 
     if ($Capabilities.capabilities.requireUpgradeIntent -eq $true) {
         $hasIntent = $false
@@ -712,22 +1187,22 @@ function Invoke-AdtUpgrade {
     }
 
     if ($DryRun) {
-        Write-AdtInfo "[dry-run] Would update submodule: $leafRel"
+        Write-AdtInfo "[dry-run] Would update submodule: $leafRelGit"
         return
     }
 
-    $before = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('submodule','status', $leafRel)
+    $before = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('submodule','status', $leafRelGit)
     if ($before.ExitCode -ne 0) {
         throw "git submodule status failed for ${leafRel}: $($before.Stderr)"
     }
 
-    Write-AdtInfo "Updating submodule: $leafRel"
-    $update = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('submodule','update','--remote','--merge', $leafRel)
+    Write-AdtInfo "Updating submodule: $leafRelGit"
+    $update = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('submodule','update','--remote','--merge', $leafRelGit)
     if ($update.ExitCode -ne 0) {
         throw "git submodule update failed for ${leafRel}: $($update.Stderr)"
     }
 
-    $after = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('submodule','status', $leafRel)
+    $after = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('submodule','status', $leafRelGit)
 
     $success = $true
     $verifyOutput = ''
@@ -738,22 +1213,31 @@ function Invoke-AdtUpgrade {
             foreach ($cmd in $leafMeta.upgradeVerification.commands) {
                 $shell = [string]$cmd.shell
                 $command = [string]$cmd.command
+                $cwd = $null
+                try { $cwd = [string]$cmd.cwd } catch { $cwd = $null }
+                $workDir = $null
+                if ($cwd -and $cwd.Trim().Length -gt 0) {
+                    $workDir = (Join-Path $RepoRoot $cwd)
+                }
+
                 $command = $command.Replace('<repoRoot>', $RepoRoot)
-                $command = $command.Replace('<leafPath>', $leafRel)
+                $command = $command.Replace('<leafPath>', $leafRelGit)
 
                 Write-AdtInfo "Verifying ($($cmd.name))"
 
                 try {
-                    if ($shell -eq 'powershell') {
-                        $out = & powershell -NoProfile -ExecutionPolicy Bypass -Command $command 2>&1 | Out-String
-                    } elseif ($shell -eq 'pwsh') {
-                        $out = & pwsh -NoProfile -Command $command 2>&1 | Out-String
-                    } elseif ($shell -eq 'cmd') {
-                        $out = & cmd /c $command 2>&1 | Out-String
-                    } else {
-                        $out = & bash -lc $command 2>&1 | Out-String
+                    if ($shell -eq 'pwsh') {
+                        Assert-AdtCommandAvailable -CommandName 'pwsh' -Hint 'Shell "pwsh" requested but pwsh was not found on PATH.'
                     }
-                    $verifyOutput += $out
+
+                    $res = Invoke-AdtShellCommand -Shell $shell -Command $command -WorkingDirectory $workDir
+                    $verifyOutput += $res.output
+
+                    if ($res.exitCode -ne 0) {
+                        $success = $false
+                        $verifyOutput += ("`nExitCode: {0}`n" -f $res.exitCode)
+                        break
+                    }
                 } catch {
                     $success = $false
                     $verifyOutput += ($_.Exception.Message + "`n")
@@ -765,8 +1249,30 @@ function Invoke-AdtUpgrade {
 
     if (-not $success) {
         Write-AdtInfo 'Verification failed; rolling back submodule pointer.'
-        $null = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('checkout','--', $leafRel)
-        $null = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('submodule','update','--init','--recursive', $leafRel)
+        $null = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('checkout','--', $leafRelGit)
+        $null = Invoke-AdtGit -RepoRoot $RepoRoot -Arguments @('submodule','update','--init','--recursive', $leafRelGit)
+    }
+
+    # Post-upgrade reconcile steps (schema + migrations + catalog + dependencies)
+    $reconcileNotes = ''
+    try {
+        $caps2 = Get-AdtCapabilities -ProjectDir $projectDir
+        Invoke-AdtDriftRepair -RepoRoot $RepoRoot -ProjectDir $projectDir -Capabilities $caps2 -DryRun:$false
+        Invoke-AdtSchemaValidation -RepoRoot $RepoRoot -ProjectDir $projectDir -Capabilities $caps2
+
+        if ($caps2.capabilities.autoMigrateSchema -eq $true) {
+            Invoke-AdtMigrations -RepoRoot $RepoRoot -ProjectDir $projectDir -DryRun:$false
+        }
+
+        if ($caps2.capabilities.coreModelEnabled -eq $true) {
+            $null = Invoke-AdtCoreCatalog -RepoRoot $RepoRoot -ProjectDir $projectDir -Capabilities $caps2 -DryRun:$false
+        }
+
+        Invoke-AdtDependencyEnforcement -RepoRoot $RepoRoot -ProjectDir $projectDir -Capabilities $caps2
+        $reconcileNotes = 'Post-upgrade reconcile: ok'
+    } catch {
+        $success = $false
+        $reconcileNotes = ("Post-upgrade reconcile failed: {0}" -f $_.Exception.Message)
     }
 
     # Record result
@@ -779,11 +1285,12 @@ function Invoke-AdtUpgrade {
     $body = @(
         "# Upgrade Result: $Leaf",
         '',
-        "- Leaf path: $leafRel",
+        "- Leaf path: $leafRelGit",
         "- At (UTC): $(Get-AdtUtcNow)",
         "- Before: $($before.Stdout.Trim())",
         "- After: $($after.Stdout.Trim())",
         "- Success: $($success)",
+        ("- Reconcile: {0}" -f $reconcileNotes),
         '',
         '## Verification output',
         '```text',

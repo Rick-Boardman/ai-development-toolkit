@@ -32,6 +32,7 @@ Bootstrap must:
 After bootstrap (and after any `_core/*` submodule updates), run reconcile:
 
 - Windows PowerShell (from repo root): `powershell -ExecutionPolicy Bypass -File _core/adt/scripts/adt.ps1 reconcile`
+- Windows PowerShell (from repo root): `powershell -ExecutionPolicy Bypass -File _core/adt/adt.ps1 reconcile`
 
 Reconcile will:
 

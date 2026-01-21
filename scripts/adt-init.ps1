@@ -55,7 +55,8 @@ function Add-AdtLineIfMissing {
     $content = Get-Content -LiteralPath $FilePath -Raw -ErrorAction SilentlyContinue
     if ($null -eq $content) { $content = '' }
 
-    if ($content -notmatch "(?m)^\s*${([Regex]::Escape($Line))}\s*$") {
+    $pattern = "(?m)^\s*$([Regex]::Escape($Line))\s*$"
+    if ($content -notmatch $pattern) {
         if ($content.Length -gt 0 -and $content[-1] -ne "`n") {
             Add-Content -LiteralPath $FilePath -Value ""
         }
@@ -185,10 +186,28 @@ if (Test-Path -LiteralPath $legacyContextDir) {
 
 # Fill missing template files
 if (Test-Path -LiteralPath $templateDir) {
-    Get-ChildItem -LiteralPath $templateDir | ForEach-Object {
-        $dest = Join-Path $projectDir $_.Name
+    $templateRoot = (Resolve-Path -LiteralPath $templateDir).Path
+    $items = Get-ChildItem -LiteralPath $templateRoot -Recurse -Force
+
+    foreach ($item in $items) {
+        $relative = $item.FullName.Substring($templateRoot.Length).TrimStart([char[]]'\\/')
+        if (-not $relative) { continue }
+
+        $dest = Join-Path $projectDir $relative
+
+        if ($item.PSIsContainer) {
+            if (-not (Test-Path -LiteralPath $dest)) {
+                New-AdtDirectory -Path $dest
+            }
+            continue
+        }
+
         if (-not (Test-Path -LiteralPath $dest)) {
-            Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force
+            $destParent = Split-Path -Parent $dest
+            if ($destParent -and -not (Test-Path -LiteralPath $destParent)) {
+                New-AdtDirectory -Path $destParent
+            }
+            Copy-Item -LiteralPath $item.FullName -Destination $dest -Force
         }
     }
 }
@@ -203,6 +222,8 @@ $defaultCapabilities = @{
         requireUpgradeIntent = $true
         coreModelEnabled = $true
         enforceCanonicalLeaves = 'warn'
+        schemaValidation = 'warn'
+        dependencyEnforcement = 'warn'
     }
 } | ConvertTo-Json -Depth 6
 

@@ -14,7 +14,9 @@
         "driftRepair": { "enum": ["off", "safe"] },
         "requireUpgradeIntent": { "type": "boolean" },
         "coreModelEnabled": { "type": "boolean" },
-        "enforceCanonicalLeaves": { "enum": ["off", "warn", "error"] }
+        "enforceCanonicalLeaves": { "enum": ["off", "warn", "error"] },
+        "schemaValidation": { "enum": ["off", "warn", "error"] },
+        "dependencyEnforcement": { "enum": ["off", "warn", "error"] }
       }
     }
   }
