@@ -28,6 +28,12 @@ Run reconcile (runs migrations, updates core catalog):
 powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 reconcile
 ```
 
+## Quickstart: add your first leaf
+
+- Create `_core/<leafName>/.core/leaf.json`
+- Follow the contract in [LEAF-AUTHOR-GUIDE.md](LEAF-AUTHOR-GUIDE.md)
+- Run `powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 reconcile`
+
 Commit:
 
 - `/_core/adt` submodule pointer

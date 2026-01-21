@@ -28,6 +28,60 @@ Then run the reconciler (applies migrations and updates platform state):
 powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 reconcile
 ```
 
+## Quickstart
+
+### 1) Add a governed leaf
+
+Create a leaf folder under `_core/` (it can be a normal folder or a git submodule). Then add metadata:
+
+- `_core/<leafName>/.core/leaf.json`
+
+Example:
+
+```json
+{
+	"kind": "leaf",
+	"name": "example-leaf",
+	"description": "Example governed leaf",
+	"upgradeVerification": {
+		"commands": [
+			{
+				"name": "Smoke test",
+				"shell": "powershell",
+				"cwd": "<repoRoot>",
+				"command": "powershell -NoProfile -Command 'Write-Host ok'"
+			}
+		]
+	}
+}
+```
+
+Then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File _core\adt\adt.ps1 reconcile
+```
+
+### 2) Declare a dependency (optional)
+
+Edit `.project/state/dependencies.json` and add an entry:
+
+```json
+{
+	"schemaVersion": "20260121T000000Z",
+	"dependencies": [
+		{
+			"leaf": "example-leaf",
+			"path": "_core/example-leaf",
+			"addedAt": "2026-01-21T00:00:00Z",
+			"notes": "Required for feature X"
+		}
+	]
+}
+```
+
+Enforcement is controlled by `.project/_schema/capabilities.json` (`dependencyEnforcement`: `off|warn|error`).
+
 ## Updating ADT (same protocol as other leaves)
 
 1. Record intent first (in your repo): `.project/record/upgrade-intents/...`
