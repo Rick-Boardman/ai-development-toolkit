@@ -5,9 +5,14 @@
   "upgradeVerification": {
     "commands": [
       {
-        "name": "Initializer help",
+        "name": "ADT CLI help",
         "shell": "powershell",
-        "command": "powershell -ExecutionPolicy Bypass -File scripts/adt-init.ps1 -?"
+        "command": "& '<repoRoot>\\_core\\adt\\scripts\\adt.ps1' help -ProjectRoot '<repoRoot>'"
+      },
+      {
+        "name": "ADT reconcile dry-run",
+        "shell": "powershell",
+        "command": "& '<repoRoot>\\_core\\adt\\scripts\\adt.ps1' reconcile -ProjectRoot '<repoRoot>' -DryRun"
       }
     ]
   }

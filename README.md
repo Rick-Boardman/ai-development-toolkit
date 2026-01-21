@@ -22,6 +22,12 @@ Then run the initializer (creates `.project/`, `.scratchpad/`, `.github/`, `.git
 powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt-init.ps1
 ```
 
+Then run the reconciler (applies migrations and updates platform state):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 reconcile
+```
+
 ## Updating ADT (same protocol as other leaves)
 
 1. Record intent first (in your repo): `.project/record/upgrade-intents/...`
@@ -31,7 +37,13 @@ powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt-init.ps1
 git submodule update --remote --merge _core/adt
 ```
 
-3. Run initializer once if needed (upgrade backfill):
+3. Run reconciler (pulls in new template files, runs migrations, updates core catalog):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 reconcile
+```
+
+4. Run initializer once if needed (upgrade backfill):
 
 If your repo already had `.project/` but does **not** have `.project/state/adt-state.json` yet:
 

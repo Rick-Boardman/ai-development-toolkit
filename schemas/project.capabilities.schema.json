@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ADT Project Capabilities",
+  "type": "object",
+  "required": ["schemaVersion", "capabilities"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "string", "minLength": 1 },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "autoMigrateSchema": { "type": "boolean" },
+        "driftRepair": { "enum": ["off", "safe"] },
+        "requireUpgradeIntent": { "type": "boolean" },
+        "coreModelEnabled": { "type": "boolean" },
+        "enforceCanonicalLeaves": { "enum": ["off", "warn", "error"] }
+      }
+    }
+  }
+}

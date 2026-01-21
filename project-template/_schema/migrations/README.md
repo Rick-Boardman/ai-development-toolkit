@@ -2,4 +2,12 @@
 
 Idempotent, re-runnable desired-state transforms.
 
-In this initial scaffold, migrations are not yet implemented.
+Migration scripts are PowerShell files named like:
+
+- `YYYYMMDDTHHMMSSZ-<name>.ps1`
+
+Each script must accept `-ProjectRoot` and return a hashtable/object with:
+
+- `id` (string)
+- `changed` (bool)
+- `notes` (string)

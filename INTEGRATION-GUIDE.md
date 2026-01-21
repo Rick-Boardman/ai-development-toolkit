@@ -22,6 +22,12 @@ Initialize `.project/` and required files:
 powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt-init.ps1
 ```
 
+Run reconcile (runs migrations, updates core catalog):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 reconcile
+```
+
 Commit:
 
 - `/_core/adt` submodule pointer
@@ -41,13 +47,21 @@ Then update the submodule pointer:
 git submodule update --remote --merge _core/adt
 ```
 
-Then run initializer (safe, idempotent):
+Option A (recommended): run ADT upgrade orchestration (requires intent by default and records results):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt-init.ps1
+powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 upgrade -Leaf adt
 ```
 
-Finally, record outcome:
+Option B: manual update + reconcile:
+
+Then run reconciler (safe, idempotent):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File _core\adt\scripts\adt.ps1 reconcile
+```
+
+If you use Option B, record outcome in:
 
 - `.project/record/upgrade-results/YYYY-MM-DD-adt.md`
 

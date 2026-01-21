@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ADT Core Index Node",
+  "type": "object",
+  "required": ["kind", "domain"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "index" },
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Domain identifier, e.g. core.vr"
+    },
+    "description": { "type": "string" },
+    "canonicalLeaves": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Leaves that must exist under _core for this domain"
+    },
+    "children": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Optional explicit children identifiers"
+    }
+  }
+}

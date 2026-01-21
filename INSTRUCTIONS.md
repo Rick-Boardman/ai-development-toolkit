@@ -27,6 +27,18 @@ Bootstrap must:
 - Detect legacy `.adt-context/` and migrate/copy content into `.project/` safely
 - Write `.project/state/adt-state.json`
 
+## Reconcile (normal run)
+
+After bootstrap (and after any `_core/*` submodule updates), run reconcile:
+
+- Windows PowerShell (from repo root): `powershell -ExecutionPolicy Bypass -File _core/adt/scripts/adt.ps1 reconcile`
+
+Reconcile will:
+
+- Pull missing files from the ADT `project-template/` into `.project/` (non-destructive)
+- Run `.project/_schema/migrations/*.ps1` when enabled in `.project/_schema/capabilities.json`
+- Update `.project/state/core-catalog.json` when core model is enabled
+
 ## During work
 
 - Keep `.project/now.md` to 1-5 items.
