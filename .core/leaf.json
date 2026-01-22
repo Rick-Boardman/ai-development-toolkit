@@ -1,5 +1,6 @@
 {
   "kind": "leaf",
+  "type": "tool",
   "name": "adt",
   "description": "AI Development Toolkit - governance + reconciliation engine",
   "upgradeVerification": {

@@ -6,6 +6,11 @@
   "additionalProperties": false,
   "properties": {
     "kind": { "const": "leaf" },
+    "type": {
+      "type": "string",
+      "enum": ["library", "tool", "guide", "prompt-pack", "schema", "template"],
+      "description": "Optional classification for the leaf. Used for documentation and governance conventions."
+    },
     "name": { "type": "string", "minLength": 1 },
     "description": { "type": "string" },
     "upgradeVerification": {

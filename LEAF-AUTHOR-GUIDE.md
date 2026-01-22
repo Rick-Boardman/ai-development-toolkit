@@ -22,14 +22,33 @@ Required fields:
 
 Optional fields:
 
+- `type`: leaf classification (recommended)
 - `description`: string
 - `upgradeVerification.commands`: array of commands ADT can run after a submodule update
+
+### Leaf types (recommended taxonomy)
+
+ADT does not treat these types differently at runtime today, but they are a useful convention for documenting intent and standardizing verification expectations.
+
+- `library`: reusable code intended to be imported/linked by other code
+  - Verification: build + tests + lint (language-specific)
+- `tool`: invocable capability (CLI/API/MCP/connector) with defined inputs/outputs
+  - Verification: `help`/`version` smoke test + a safe dry-run call when possible
+- `guide`: integration documentation and Copilot-facing prompts/procedures (may include code examples)
+  - Verification: Markdown correctness + copy/paste snippets + optional “example compiles” checks if you ship runnable samples
+- `prompt-pack`: curated prompt templates / procedures intended for injection/retrieval as agent context
+  - Verification: format/frontmatter linting + basic “prompt contract” checks
+- `schema`: contracts that govern other artifacts (e.g., JSON Schemas)
+  - Verification: schema validates + sample documents validate against it
+- `template`: scaffolding used by reconciliation/bootstrapping
+  - Verification: reconcile applies idempotently; generated files match expectations
 
 Example:
 
 ```json
 {
   "kind": "leaf",
+  "type": "tool",
   "name": "adt",
   "description": "AI Development Toolkit",
   "upgradeVerification": {

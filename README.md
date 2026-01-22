@@ -41,6 +41,7 @@ Example:
 ```json
 {
 	"kind": "leaf",
+	"type": "tool",
 	"name": "example-leaf",
 	"description": "Example governed leaf",
 	"upgradeVerification": {
